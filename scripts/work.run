@@ -1,0 +1,11 @@
+#!/bin/bash
+#SBATCH --nodes 2
+#SBATCH --ntasks 1
+#SBATCH --cpus-per-task 8
+#SBATCH --mem 40G
+#SBATCH --time 3:00:00
+
+
+source /home/jiguo/denovo_rpe1_scrnaseq/venvs/rna/bin/activate
+python /home/jiguo/denovo_rpe1_scrnaseq/scripts/calculate_correlation.py
+
