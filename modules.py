@@ -341,80 +341,94 @@ def plot_customize_volcano(de_results, control_condition, gene_of_interest_1,
     """
     plot customized volcano plot for DE results with specific genes of interest highlighted.
     """
-    # Get conditions from de_results keys, not adata.obs
     conditions = list(de_results.keys())
     n_conditions = len(conditions)
-    # if give a path, load the list, if give a list, use it directly, gothrough this process for every gene_list of interest
+
+    # Process gene lists
+    processed_gene_lists = []
     for gene_list in [gene_of_interest_1, gene_of_interest_2, gene_of_interest_3]:
+        if gene_list is None:
+            processed_gene_lists.append([])
+            continue
         if isinstance(gene_list, str):
-            gene_list = load_gene_list(gene_list)
+            processed_gene_lists.append(load_gene_list(gene_list))
         elif isinstance(gene_list, list):
-            gene_list = gene_list
-        else:
-            raise ValueError("gene_of_interest should be a file path or a list of genes")
-    # Calculate grid dimensions
+            processed_gene_lists.append(gene_list)
+
     n_cols = min(2, n_conditions)
     n_rows = (n_conditions + n_cols - 1) // n_cols
-    plt.figure(figsize=(15, 6*n_rows))
+    plt.figure(figsize=(15, 6 * n_rows))
     sns.set(style='whitegrid', font_scale=1.2)
     
     for i, cond in enumerate(conditions, 1):
-        df = de_results[cond]
-        ax = plt.subplot(n_rows, n_cols, i)  # Fixed index: use i not i+1
-        n=1
-        # Significance thresholds (use pvals_adj for FDR)
-        sig_threshold = threshold_pval
-        logfc_threshold = threshold_logfc
+        df = de_results[cond].copy() # Use a copy to avoid modifying the original DataFrame
+        ax = plt.subplot(n_rows, n_cols, i)
+        
+        # Define significance categories with priority
         df['significance'] = 'Not significant'
-        for gene_list in [gene_of_interest_1, gene_of_interest_2, gene_of_interest_3]:
-            df[f'is in gene_list {n}'] = df['gene_name'].isin(gene_list)
-            df['significance'] = np.where(df[f'is in gene_list {n}'], f'gene_list{n}', df['significance'])
-            n += 1
+        
+        # Apply gene lists in reverse order of priority for correct labeling
+        if processed_gene_lists[2]: # gene_of_interest_3
+            df.loc[df['gene_name'].isin(processed_gene_lists[2]), 'significance'] = 'gene_list3'
+        if processed_gene_lists[1]: # gene_of_interest_2
+            df.loc[df['gene_name'].isin(processed_gene_lists[1]), 'significance'] = 'gene_list2'
+        if processed_gene_lists[0]: # gene_of_interest_1
+            df.loc[df['gene_name'].isin(processed_gene_lists[0]), 'significance'] = 'gene_list1'
+
         df['significance'] = pd.Categorical(df['significance'], 
-                                            categories=['gene_list1', 'gene_list2', 'gene_list3','Not significant'],)
+                                            categories=['gene_list1', 'gene_list2', 'gene_list3', 'Not significant'],
+                                            ordered=True)
+
         sns.scatterplot(
             data=df,
             x='logfoldchanges',
-            y='-log10_pvals_adj',  # Match the column name
+            y='-log10_pvals_adj',
             hue='significance',
             palette={
-                'gene_list1': '#ff7f00',  # Orange for genes in gene_list1
-                'gene_list2': '#4daf4a',  # Green for genes in gene_list2
-                'gene_list3': '#ff00ff',  # Magenta for genes in gene_list3
-                'Not significant': '#bdbdbd'  # Gray for non-significant genes
+                'gene_list1': '#ff7f00',
+                'gene_list2': '#4daf4a',
+                'gene_list3': '#ff00ff',
+                'Not significant': '#bdbdbd'
             },
             alpha=0.7,
             s=40,
             ax=ax
         )
-        # Gene labeling - better approach
+        
+        # Gene labeling
         df['combined_score'] = np.abs(df['logfoldchanges']) * df['-log10_pvals_adj']
         top_genes = df.nlargest(10, 'combined_score')
-
         for _, row in top_genes.iterrows():
             ax.text(
                 row['logfoldchanges'],
-                row['-log10_pvals_adj'] + 0.1,  # Offset to avoid overlap
+                row['-log10_pvals_adj'] + 0.1,
                 row['gene_name'],
                 fontsize=9,
                 alpha=0.8,
                 fontweight='bold'
             )
-        # Add thresholdsa
-        ax.axhline(-np.log10(sig_threshold), color='gray', linestyle='--', alpha=0.7)
-        ax.axvline(logfc_threshold, color='gray', linestyle='--', alpha=0.7)
-        ax.axvline(-logfc_threshold, color='gray', linestyle='--', alpha=0.7)
-        # Correct title
-        ax.set_title(f'{control_condition} vs {cond}', fontsize=16)  # Fixed title
-        ax.set_xlabel('Log2 Fold Change', fontsize=14)
-        ax.set_ylabel('-Log10(Adjusted p-value)', fontsize=14)
-        ax.set_xlim(df['logfoldchanges'].min()-0.5, df['logfoldchanges'].max()+0.5)
-        ax.legend().remove()  # Remove individual legends
-    
-    # Add common legend
-    plt.tight_layout()
+            
+        # Add thresholds
+        ax.axhline(-np.log10(threshold_pval), color='gray', linestyle='--', alpha=0.7)
+        ax.axvline(threshold_logfc, color='gray', linestyle='--', alpha=0.7)
+        ax.axvline(-threshold_logfc, color='gray', linestyle='--', alpha=0.7)
+        
+        ax.set_title(f'{control_condition} vs {cond}', fontsize=title_fontsize)
+        ax.set_xlabel('Log2 Fold Change', fontsize=font_size)
+        ax.set_ylabel('-Log10(Adjusted p-value)', fontsize=font_size)
+        ax.set_xlim(df['logfoldchanges'].min() - 0.5, df['logfoldchanges'].max() + 0.5)
+        ax.legend().remove()
+
+    plt.tight_layout(rect=[0, 0.05, 1, 1]) # Adjust layout to make space for figlegend
     handles, labels = ax.get_legend_handles_labels()
-    plt.figlegend(handles, labels, loc='lower center', ncol=3)
+    
+    # Filter out unused legend entries
+    used_labels = df['significance'].unique()
+    filtered_handles = [h for h, l in zip(handles, labels) if l in used_labels]
+    filtered_labels = [l for l in labels if l in used_labels]
+
+    plt.figlegend(filtered_handles, filtered_labels, loc='lower center', ncol=4, bbox_to_anchor=(0.5, 0))
+    
     return plt
 
 
@@ -667,88 +681,51 @@ def plot_gene_network(G, color_by="category", title='Gene Correlation Network'):
 
 
 
-# location analysis functions
 # Check the location of genes in the database
 def check_location_of_genes(gene_list, gene_index=None, database_file="/home/jiguo/data/data/location/subcellular_location_data.tsv", keep_uncertain=True):
-    """
-    Check the location of genes in the database.
-    will return a metrix where rows are genes and columns are unique locations.
-    values in the matrix are:
-    1: Approved, 2: Supported, 3: Enhanced, 0: Uncertain, NaN: Not found in the database.
-    """
-    # load the databases which contain the location information from hpa, need to be .tsv file
-    if database_file.endswith('.tsv'):
-        location_data = pd.read_csv(database_file, sep='\t', low_memory=False, header=0)
-    else:
-        print("Error: The database file must be a .tsv file.")
-        return None
-    location_data = location_data[["Reliability", "Approved", "Supported", "Gene name","Enhanced",'Uncertain']]
-    if keep_uncertain==False:
+    if not os.path.exists(database_file):
+        raise FileNotFoundError(f"Database file not found: {database_file}")
+    location_data = pd.read_csv(database_file, sep='\t', low_memory=False, header=0)
+    location_cols = ["Approved", "Supported", "Enhanced", "Uncertain"]
+    location_data = location_data[["Gene name", "Reliability"] + location_cols]
+    if not keep_uncertain:
         location_data = location_data[location_data['Reliability'] != 'Uncertain']
-    # if gene_list is a file, read it using load_gene_list
     if isinstance(gene_list, str):
         gene_list = load_gene_list(gene_list, gene_index=gene_index)
-    # if gene_list is a list, convert it to a pandas Series
     if gene_list is not None:
         location_data = location_data[location_data['Gene name'].isin(gene_list)]
-    else: # use all the genes in the database
-        print("No gene list provided, using all genes in the database.")
-        location_data = location_data
     if location_data.empty:
-        print("No genes found in the database.")
+        print("No genes from the list were found in the location database.")
         return None 
-    # columns indeices are all the unique locations from both "Approved", "Supported", "Enhanced", "Uncertain"
+    # Fill NaN with empty strings to prevent errors with .split()
+    for col in location_cols:
+        location_data[col] = location_data[col].fillna('')
     unique_locations = set()
-    for index, row in location_data.iterrows():
-        # drop nan values in the columns "Approved", "Supported", "Enhanced", "Uncertain"
-        if pd.isna(row["Approved"]) or pd.isna(row["Supported"]) or pd.isna(row["Enhanced"]) or pd.isna(row["Uncertain"]):
-            # change nan to empty string
-            row["Approved"] = "" if pd.isna(row["Approved"]) else row["Approved"]
-            row["Supported"] = "" if pd.isna(row["Supported"]) else row["Supported"]
-            row["Enhanced"] = "" if pd.isna(row["Enhanced"]) else row["Enhanced"]
-            row["Uncertain"] = "" if pd.isna(row["Uncertain"]) else row["Uncertain"]
-        # split the locations by ";"
-        approved_locations = row["Approved"].split(";")
-        supported_locations = row["Supported"].split(";")
-        enhanced_locations = row["Enhanced"].split(";")
-        uncertain_locations = row["Uncertain"].split(";")
-        unique_locations.update(approved_locations)
-        unique_locations.update(supported_locations)
-        unique_locations.update(enhanced_locations)
-        unique_locations.update(uncertain_locations)
-    unique_locations = sorted(unique_locations)
-    unique_locations.remove("")  # remove empty string if exists
-    # Create a Matrix to store the results
-    results = pd.DataFrame(columns=["Gene name", "Location"])
-    for location in unique_locations:
-        results[location] = 0  # initialize all locations to 0
-    results['Gene name'] = location_data['Gene name']  # add the gene names to the first column
-    for index, row in location_data.iterrows():
-        if pd.isna(row["Approved"]) or pd.isna(row["Supported"]) or pd.isna(row["Enhanced"]) or pd.isna(row["Uncertain"]):
-            # change nan to empty string
-            row["Approved"] = "" if pd.isna(row["Approved"]) else row["Approved"]
-            row["Supported"] = "" if pd.isna(row["Supported"]) else row["Supported"]
-            row["Enhanced"] = "" if pd.isna(row["Enhanced"]) else row["Enhanced"]
-            row["Uncertain"] = "" if pd.isna(row["Uncertain"]) else row["Uncertain"]
-        gene_name = row["Gene name"]
-        approved_locations = row["Approved"].split(";")
-        supported_locations = row["Supported"].split(";")
-        enhanced_locations = row["Enhanced"].split(";")
-        uncertain_locations = row["Uncertain"].split(";")
-        # if the gene location is in the unique locations, set the value to 1
-        for location in approved_locations:
-            if location in unique_locations:
-                results.loc[results['Gene name'] == gene_name, location] = 1
-        for location in supported_locations:
-            if location in unique_locations:
-                results.loc[results['Gene name'] == gene_name, location] = 2
-        for location in enhanced_locations:
-            if location in unique_locations:
-                results.loc[results['Gene name'] == gene_name, location] = 3
-            for location in uncertain_locations:
-                if location in unique_locations:
-                    results.loc[results['Gene name'] == gene_name, location] = 0  
-    return results
+    for col in location_cols:
+        # Vectorized string operation for efficiency
+        locations = location_data[col].str.split(';').explode().unique()
+        unique_locations.update(l for l in locations if l) # Filter out empty strings
+    unique_locations = sorted(list(unique_locations))
+    # Initialize results DataFrame
+    results = pd.DataFrame(0, index=location_data['Gene name'], columns=unique_locations)
+    # Map reliability to scores
+    reliability_map = {"Approved": 1, "Supported": 2, "Enhanced": 3, "Uncertain": 0}
+    for reliability, score in reliability_map.items():
+        if reliability == "Uncertain" and not keep_uncertain:
+            continue       
+        col_name = reliability
+        # Iterate over genes and their locations for a specific reliability
+        for index, row in location_data.iterrows():
+            locations = row[col_name].split(';')
+            for loc in locations:
+                if loc in results.columns:
+                    # Update the score only if the new score is higher (more reliable)
+                    # or if the current score is 0
+                    if results.loc[row['Gene name'], loc] < score:
+                         results.loc[row['Gene name'], loc] = score
+    
+    return results.reset_index().rename(columns={'index': 'Gene name'})
+
 
 # Plot the location of genes in the database
 def plot_location_of_genes(result_matrix, showReliability=True, xstikrotation=90):
@@ -850,5 +827,3 @@ def find_proteins_localization(location, matrix, showReliability=False, save=Fal
         return list(zip(localized_genes, reliability_levels))
     else:
         return list(zip(localized_genes, reliability_levels))
-
-# find_proteins_localization("Centrosome", results, showReliability=False, save=True, outputpath='/home/jiguo/denovo_rpe1_scrnaseq/')
